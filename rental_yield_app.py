@@ -2,59 +2,73 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import os
 
-st.set_page_config(page_title="Rental Yield Calculator", layout="centered")
-st.title("🏠 Rental Yield Calculator")
-st.markdown("""
-Upload a CSV file with the following columns:
-- **Suburb**
-- **Price** (e.g., 750000)
-- **Weekly_Rent** (e.g., 600)
-""")
+st.set_page_config(page_title="Rental Yield Calculator", layout="wide")
 
-uploaded_file = st.file_uploader("📁 Upload your CSV file", type=["csv"])
+st.title("🏡 Rental Yield Calculator")
+st.write("Upload a CSV file with columns: `Suburb`, `Price`, and `Weekly_Rent`. Or use sample data below.")
 
-if uploaded_file is not None:
+# Upload CSV
+uploaded_file = st.file_uploader("Upload your property data (.csv)", type="csv")
+
+if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.success("✅ File uploaded successfully")
 else:
-    st.warning("⚠️ No file uploaded. Using default sample data.")
-    sample_file = 'sample_data.csv'
-    df = pd.read_csv(sample_file)
+    st.info("No file uploaded — using sample data below 👇")
+    sample_data = {
+        'Suburb': ['Hawthorn', 'Richmond', 'Brunswick', 'Footscray', 'Southbank'],
+        'Price': [850000, 790000, 710000, 670000, 910000],
+        'Weekly_Rent': [650, 630, 600, 580, 700]
+    }
+    df = pd.DataFrame(sample_data)
 
-# Drop rows with missing data
+# Clean and prepare data
 df.dropna(inplace=True)
-
-# Calculate Annual Rent and Gross Yield
 df['Annual_Rent'] = df['Weekly_Rent'] * 52
+
+# Sidebar: Adjustable costs
+st.sidebar.header("Cost Assumptions")
+vacancy_rate = st.sidebar.slider("Vacancy Rate (%)", 0.0, 10.0, 2.0) / 100
+property_tax = st.sidebar.slider("Property Tax (%)", 0.0, 5.0, 1.0) / 100
+maintenance = st.sidebar.slider("Maintenance (% of price)", 0.0, 5.0, 1.0) / 100
+insurance = st.sidebar.slider("Insurance (% of price)", 0.0, 3.0, 0.5) / 100
+include_strata = st.sidebar.checkbox("Include Strata Fees", value=False)
+strata_annual = st.sidebar.number_input("Annual Strata ($)", value=2500.0) if include_strata else 0
+
+# Calculations
+df['Vacancy_Loss'] = df['Annual_Rent'] * vacancy_rate
+df['Property_Tax'] = df['Price'] * property_tax
+df['Maintenance_Cost'] = df['Price'] * maintenance
+df['Insurance_Cost'] = df['Price'] * insurance
+df['Strata_Fees'] = strata_annual
+
+df['Net_Annual_Income'] = df['Annual_Rent'] - (
+    df['Vacancy_Loss'] +
+    df['Property_Tax'] +
+    df['Maintenance_Cost'] +
+    df['Insurance_Cost'] +
+    df['Strata_Fees']
+)
+
 df['Gross_Yield'] = (df['Annual_Rent'] / df['Price']) * 100
+df['Net_Yield'] = (df['Net_Annual_Income'] / df['Price']) * 100
 
-# Assume annual costs as % of annual rent
-vacancy_rate = 0.05
-maintenance_rate = 0.05
-management_rate = 0.05
+# Display
+st.subheader("📊 Rental Yield Summary")
+st.dataframe(df[['Suburb', 'Price', 'Weekly_Rent', 'Gross_Yield', 'Net_Yield']].round(2))
 
-# Calculate total annual costs and net yield
-df['Annual_Cost'] = df['Annual_Rent'] * (vacancy_rate + maintenance_rate + management_rate)
-df['Net_Yield'] = ((df['Annual_Rent'] - df['Annual_Cost']) / df['Price']) * 100
-
-# Show results
-st.subheader("📊 Rental Yield Table")
-st.dataframe(df[['Suburb', 'Price', 'Weekly_Rent', 'Gross_Yield', 'Net_Yield']].sort_values(by='Net_Yield', ascending=False))
-
-# Plot Net Yield Chart
+# Bar Chart
 st.subheader("📈 Net Yield by Suburb")
 fig, ax = plt.subplots()
 ax.bar(df['Suburb'], df['Net_Yield'], color='skyblue')
-plt.xticks(rotation=45)
-plt.ylabel("Net Yield (%)")
-plt.title("Net Rental Yield per Suburb")
+ax.set_ylabel("Net Rental Yield (%)")
 st.pyplot(fig)
 
-# Export button
+# Export
 st.subheader("📁 Download Results")
-export_file = "rental_yield_results.xlsx"
-df.to_excel(export_file, index=False)
-with open(export_file, "rb") as f:
-    st.download_button(label="📥 Download Excel File", data=f, file_name=export_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+@st.cache_data
+def convert_df(df):
+    return df.to_csv(index=False).encode('utf-8')
+
+csv = convert_df(df)
+st.download_button("Download CSV", csv, "rental_yield_results.csv", "text/csv")
